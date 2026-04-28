@@ -26,7 +26,7 @@ This skill preserves the best parts while closing every risk vector, and adds au
 | Auto-modify core files | ✅ Auto | ✅ Human-approval gate |
 | Hook scripts read output | ✅ Yes | ❌ Removed |
 | Secrets in logs | ⚠️ Soft | ✅ **Script-enforced sanitization** |
-| Bulk promotion abuse | ❌ Unchecked | ✅ **Rate-limiting +冷静期** |
+| Bulk promotion abuse | ❌ Unchecked | ✅ **Rate-limiting + cooldown period** |
 | No self-audit | ❌ None | ✅ **Automated audit.sh** |
 | High-security use | ❌ No warning | ✅ **Explicit disclaimer** |
 | Dynamic payload fetching | ⚠️ Risk | ✅ **Explicitly forbidden** |
