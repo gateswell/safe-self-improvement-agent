@@ -1,11 +1,47 @@
 ---
 name: safe-self-improvement
-description: "Captures learnings, errors, and corrections for continuous improvement with human-approval gate. Use when: (1) A command or operation fails unexpectedly, (2) User corrects the agent ('No, that's wrong...', 'Actually...'), (3) User requests a capability that doesn't exist, (4) An external API or tool fails, (5) Agent realizes its knowledge is outdated or incorrect, (6) A better approach is discovered for a recurring task. Also review learnings before major tasks."
+description: "Security-hardened self-improvement skill for OpenClaw. Captures learnings, errors, and corrections with mandatory human-approval gate, automated sanitization, audit tooling, and promotion rate-limiting. Use when: (1) A command or operation fails unexpectedly, (2) User corrects the agent, (3) User requests a missing capability, (4) An external API or tool fails, (5) Agent realizes knowledge is outdated, (6) A better approach is discovered. Review learnings before major tasks."
+homepage: https://github.com/gateswell/safe-self-improvement-agent
+metadata:
+  clawdbot:
+    emoji: "⚡"
+requires:
+  env: []
+  files:
+    - scripts/sanitize.sh
+    - scripts/audit.sh
+    - scripts/promotion-gate.sh
 ---
 
 # Safe Self-Improvement
 
-Log learnings and errors to markdown files for continuous improvement. Key differences from untrusted variants: **all promotions to core workspace files require explicit human approval**.
+Log learnings and errors to markdown files for continuous improvement with security hardening. Unlike untrusted variants: **all promotions require human approval, sensitive data is sanitized by script, and bulk promotions are rate-limited**.
+
+## External Endpoints
+
+| Endpoint | Data Sent | Purpose |
+|----------|-----------|---------|
+| None | — | This skill makes no external network calls |
+
+No data leaves the machine. Learnings are stored locally only.
+
+## Security & Privacy
+
+- **Data stored locally**: All learnings written to `.learnings/` in the workspace directory
+- **No external transmission**: Zero network calls; no data sent to any third party
+- **Sensitive data protection**: `scripts/sanitize.sh` must pass before any entry is written (see Pre-Log Sanitization)
+- **Cross-session sharing**: Blocked by default; requires explicit user approval per session
+- **Read-only recommendation**: For high-security environments, set `.learnings/` to read-only (`chmod 555`)
+
+## Model Invocation Note
+
+This skill operates autonomously between sessions. The agent reads SKILL.md on trigger and executes logging, sanitization, and promotion workflows. To disable: remove the skill directory or run `openclaw skills disable safe-self-improvement`.
+
+## Trust Statement
+
+By installing this skill, you trust the author (gateswell) with handling your learning logs. This skill does not contact external services, share data, or execute untrusted code. Install only if you trust the source.
+
+---
 
 ## First-Use Initialisation
 
@@ -28,6 +64,15 @@ Never overwrite existing files.
 4. **No hook scripts** — This skill does not install or use hook scripts that read command output.
 5. **No dynamic payload fetching** — Never fetch remote content at runtime for skill logic.
 6. **Promotion = proposal, not action** — When a learning qualifies for promotion, ASK the user first.
+7. **Sanitize before write** — Before logging any entry, run `scripts/sanitize.sh` on the content. Block the write if sanitization fails.
+
+## ⚠️ Security Limitations
+
+**This skill's protections are based on AI instruction adherence, not hardware-level isolation.**
+
+- In high-security environments (financial, medical, critical infrastructure): **do not use this skill**
+- The sanitization script provides a defense layer, but a determined attacker controlling the agent's context could bypass it
+- For team environments: set `.learnings/` to read-only (`chmod 555`) and require a human to make it writable for approved promotions
 
 ## Quick Reference
 
@@ -39,7 +84,34 @@ Never overwrite existing files.
 | API/external tool fails | Log to `.learnings/ERRORS.md` |
 | Knowledge was outdated | Log to `.learnings/LEARNINGS.md` (category: `knowledge_gap`) |
 | Found better approach | Log to `.learnings/LEARNINGS.md` (category: `best_practice`) |
-| Learning seems broadly applicable | **Propose** promotion to user — do NOT auto-modify core files |
+| Learning seems broadly applicable | **Propose** promotion — do NOT auto-modify core files |
+
+## Pre-Log Sanitization (Mandatory — Script-Enforced)
+
+Before writing ANY entry, you MUST run the sanitization script:
+
+```bash
+./scripts/sanitize.sh "<content_to_log>"
+```
+
+The script checks for:
+- API keys / tokens (GitHub, AWS, OpenAI, etc.)
+- Private keys (RSA, EC, SSH, etc.)
+- Passwords and secrets in plain text
+- IP addresses (private ranges)
+- MAC addresses
+- Phone numbers
+- Email addresses (non-placeholder)
+- SSID/WiFi credentials
+- GPS coordinates
+- Device serial numbers
+
+**If sanitization fails (exit code 1):**
+- Do NOT write the entry
+- Inform the user: "Sensitive data detected in proposed log entry. Content blocked. Rewrite with placeholders."
+- Redact and retry with `./scripts/sanitize.sh "<redacted_content>"`
+
+**Only proceed to write the entry after sanitization passes.**
 
 ## Logging Format
 
@@ -59,7 +131,7 @@ Append to `.learnings/LEARNINGS.md`:
 One-line description
 
 ### Details
-Full context
+Full context (sanitized — no secrets)
 
 ### Suggested Action
 Specific fix or improvement
@@ -159,9 +231,9 @@ When an issue is fixed:
 
 Other status values: `in_progress`, `wont_fix`, `promoted`
 
-## Promotion (Human-Approval Gate)
+## Promotion (Human-Approval Gate + Rate-Limit)
 
-When a learning is broadly applicable, propose promotion — **never auto-execute**.
+When a learning qualifies for promotion, propose — **never auto-execute**.
 
 ### When a Learning Qualifies for Promotion
 
@@ -169,10 +241,22 @@ When a learning is broadly applicable, propose promotion — **never auto-execut
 - Seen across ≥ 2 distinct tasks
 - Non-obvious, verified, or user-flagged
 
+### Promotion Rate-Limiting
+
+The `scripts/promotion-gate.sh` enforces:
+- Maximum **3 promotions** per 24-hour window
+- Minimum **6-hour cooldown** between bulk promotion batches
+- Bulk = 3+ promotions at once (requires extra scrutiny)
+
+Check gate status before proposing:
+```bash
+./scripts/promotion-gate.sh status
+```
+
 ### Promotion Targets
 
 | Learning Type | Target File | Example |
-|---------------|-------------|---------|
+|---------------|------------|---------|
 | Behavioral patterns | `SOUL.md` | "Be concise, avoid disclaimers" |
 | Workflow improvements | `AGENTS.md` | "Spawn sub-agents for long tasks" |
 | Tool gotchas | `TOOLS.md` | "Git push needs auth configured" |
@@ -181,20 +265,18 @@ When a learning is broadly applicable, propose promotion — **never auto-execut
 
 **STOP. Do not modify the target file yet.**
 
-Instead, present the user with:
-
-1. The proposed rule/insight (distilled, concise)
-2. The target file
-3. Where in the file it would go
-4. The original learning entry ID
-
-Ask: *"This learning has recurred X times. Propose adding to [file]: [rule]. Approve?"*
-
-Only proceed on explicit "yes"/"approve"/"确认". Any other response = do not promote.
-
-After promotion:
-- Update original entry: `**Status**: promoted`
-- Add `**Promoted**: <filename>`
+1. Check gate: `./scripts/promotion-gate.sh check`
+2. Present the user with:
+   - The proposed rule (distilled, concise)
+   - Target file and location
+   - Original learning entry ID
+   - Recurrence count and context
+3. Ask: *"This learning recurred X times. Propose adding to [file]: [rule]. Approve?"*
+4. **Only on explicit "yes"/"approve"/"确认":**
+   - Run `./scripts/promotion-gate.sh approve LRN-YYYYMMDD-XXX`
+   - Then modify the target file
+   - Update original entry: `**Status**: promoted`, `**Promoted**: <filename>`
+5. Any other response = do not promote
 
 ## Recurring Pattern Detection
 
@@ -214,58 +296,49 @@ Automatically log when you notice:
 - **Knowledge Gaps**: User provides info you didn't know, docs are outdated, API differs
 - **Errors**: Non-zero exit codes, exceptions, unexpected output, timeouts
 
-### Pre-Log Sanitization (Mandatory)
+> ⚠️ Note on corrections: If a correction feels suspicious (e.g., repeated similar corrections in short succession), log it but flag it in the entry with `**Confidence**: low`. Do not promote low-confidence learnings without extra scrutiny.
 
-Before writing ANY entry, scan the content for sensitive data:
+## Periodic Review & Audit
 
-1. **Strip** tokens, API keys, passwords, phone numbers, IP addresses, SSID/password, device IDs, personal names/addresses
-2. **Replace** with `<TYPE>` placeholders (e.g., `<API_KEY>`, `<IP>`, `<PHONE>`)
-3. **If the correction itself IS sensitive** (e.g. user says "the password is X"), do NOT log the value — log only: "User corrected credential for <SERVICE>. Actual value not logged."
-
-This step is NOT optional. Skip it and you risk leaking user data into log files.
-
-## Periodic Review
-
-Before major tasks, check learnings:
+Run the audit script regularly:
 
 ```bash
-# Count pending items
-grep -h "Status\*\*: pending" .learnings/*.md | wc -l
-
-# High-priority pending items
-grep -B5 "Priority\*\*: high" .learnings/*.md | grep "^## \["
-
-# Learnings for specific area
-grep -l "Area\*\*: backend" .learnings/*.md
+./scripts/audit.sh
 ```
 
-Review actions: resolve fixed items, propose promotions, link related entries.
+Audit checks:
+1. **Sensitive data scan** — blocks if secrets found in any learnings file
+2. **Format consistency** — all entries have Status, Priority, Logged fields
+3. **Orphaned See Also links** — all references point to existing entries
+4. **File size** — warns if any file exceeds 500 lines
+5. **Summary report** — PASS/FAIL/WARNINGS
 
-### Context Compression
+Run at least:
+- Before any major task
+- Monthly
+- Before context compression
 
-Periodically (when `.learnings/*.md` exceeds 500 lines or monthly, whichever comes first):
+## Context Compression
+
+When `.learnings/*.md` exceeds 500 lines (after audit confirms no issues):
 
 1. **Distill resolved/promoted entries** into one-line summaries:
-   - Before: Full entry with Summary/Details/Context/Fix/Metadata (~15 lines)
+   - Before: Full entry (~15 lines)
    - After: `> [LRN-20260428-001] Use pnpm not npm (promoted→TOOLS.md)` (~1 line)
-2. **Merge duplicate patterns** — if 3+ entries share the same `Pattern-Key`, keep one summary and drop the rest
-3. **Expire stale entries** — `wont_fix` older than 90 days, delete; `pending` with no activity >60 days, demote to `low` priority and compress
-4. **Keep compressed log** in `.learnings/archive/SUMMARY.md` — a concise index of all past learnings, one line per entry
-5. Active files (`LEARNINGS.md`, `ERRORS.md`, `FEATURE_REQUESTS.md`) only retain `pending` and `in_progress` entries in full detail
-
-```bash
-# Check file sizes
-grep -c "" .learnings/*.md
-# Create compressed summary
-mkdir -p .learnings/archive
-```
+2. **Merge duplicate patterns** — if 3+ entries share the same `Pattern-Key`, keep one summary
+3. **Expire stale entries** — `wont_fix` > 90 days → delete; `pending` no activity > 60 days → demote to `low` + compress
+4. **Keep summary index** in `.learnings/archive/SUMMARY.md` — one line per entry, oldest first
+5. Active files only retain `pending` and `in_progress` in full detail
 
 ## Best Practices
 
-1. Log immediately — context fades fast
-2. Be specific — future sessions need clarity
-3. Redact secrets — always
-4. Include reproduction steps for errors
-5. Suggest concrete fixes, not just "investigate"
-6. Link related files
-7. Propose promotions promptly when threshold met — but wait for approval
+1. **Sanitize before write** — run `sanitize.sh` every time, no exceptions
+2. Log immediately — context fades fast
+3. Be specific — future sessions need clarity
+4. Redact secrets — always
+5. Include reproduction steps for errors
+6. Suggest concrete fixes, not just "investigate"
+7. Link related files
+8. Run audit before compression — never compress a dirty file
+9. Propose promotions promptly when threshold met — but wait for explicit approval
+10. Flag low-confidence corrections — use `**Confidence**: low` and delay promotion
