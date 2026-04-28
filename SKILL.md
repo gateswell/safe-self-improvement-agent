@@ -24,7 +24,7 @@ Never overwrite existing files.
 
 1. **NEVER auto-modify core files** — `SOUL.md`, `AGENTS.md`, `TOOLS.md`, `MEMORY.md`, `IDENTITY.md` must NOT be modified without explicit user approval shown as a clear question and awaiting a "yes" response.
 2. **No secrets in logs** — Never log tokens, API keys, passwords, private keys, env vars, or full config/source files. Use redacted summaries only.
-3. **No cross-session sharing** — Do not use `sessions_send` or `sessions_spawn` to share learnings unless the user explicitly asks.
+3. **No cross-session sharing without approval** — Using `sessions_send` or `sessions_spawn` to share learnings requires the same approval gate as promotion: present what will be shared, to which session, and wait for explicit "yes". Never share automatically.
 4. **No hook scripts** — This skill does not install or use hook scripts that read command output.
 5. **No dynamic payload fetching** — Never fetch remote content at runtime for skill logic.
 6. **Promotion = proposal, not action** — When a learning qualifies for promotion, ASK the user first.
@@ -214,6 +214,16 @@ Automatically log when you notice:
 - **Knowledge Gaps**: User provides info you didn't know, docs are outdated, API differs
 - **Errors**: Non-zero exit codes, exceptions, unexpected output, timeouts
 
+### Pre-Log Sanitization (Mandatory)
+
+Before writing ANY entry, scan the content for sensitive data:
+
+1. **Strip** tokens, API keys, passwords, phone numbers, IP addresses, SSID/password, device IDs, personal names/addresses
+2. **Replace** with `<TYPE>` placeholders (e.g., `<API_KEY>`, `<IP>`, `<PHONE>`)
+3. **If the correction itself IS sensitive** (e.g. user says "the password is X"), do NOT log the value — log only: "User corrected credential for <SERVICE>. Actual value not logged."
+
+This step is NOT optional. Skip it and you risk leaking user data into log files.
+
 ## Periodic Review
 
 Before major tasks, check learnings:
@@ -230,6 +240,25 @@ grep -l "Area\*\*: backend" .learnings/*.md
 ```
 
 Review actions: resolve fixed items, propose promotions, link related entries.
+
+### Context Compression
+
+Periodically (when `.learnings/*.md` exceeds 500 lines or monthly, whichever comes first):
+
+1. **Distill resolved/promoted entries** into one-line summaries:
+   - Before: Full entry with Summary/Details/Context/Fix/Metadata (~15 lines)
+   - After: `> [LRN-20260428-001] Use pnpm not npm (promoted→TOOLS.md)` (~1 line)
+2. **Merge duplicate patterns** — if 3+ entries share the same `Pattern-Key`, keep one summary and drop the rest
+3. **Expire stale entries** — `wont_fix` older than 90 days, delete; `pending` with no activity >60 days, demote to `low` priority and compress
+4. **Keep compressed log** in `.learnings/archive/SUMMARY.md` — a concise index of all past learnings, one line per entry
+5. Active files (`LEARNINGS.md`, `ERRORS.md`, `FEATURE_REQUESTS.md`) only retain `pending` and `in_progress` entries in full detail
+
+```bash
+# Check file sizes
+grep -c "" .learnings/*.md
+# Create compressed summary
+mkdir -p .learnings/archive
+```
 
 ## Best Practices
 
